@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from chia.consensus.constants import ConsensusConstants
 from chia.consensus.default_constants import DEFAULT_CONSTANTS
@@ -26,7 +26,7 @@ def create_harvester_service(
     root_path: pathlib.Path,
     config: Dict[str, Any],
     consensus_constants: ConsensusConstants,
-    farmer_peer: Optional[UnresolvedPeerInfo],
+    farmer_peers: Optional[List[UnresolvedPeerInfo]],
     connect_to_daemon: bool = True,
 ) -> Service[Harvester]:
     service_config = config[SERVICE_NAME]
@@ -48,7 +48,7 @@ def create_harvester_service(
         node_type=NodeType.HARVESTER,
         advertised_port=service_config["port"],
         service_name=SERVICE_NAME,
-        connect_peers=set() if farmer_peer is None else {farmer_peer},
+        connect_peers=farmer_peers,
         network_id=network_id,
         rpc_info=rpc_info,
         connect_to_daemon=connect_to_daemon,
@@ -62,8 +62,16 @@ async def async_main() -> int:
     service_config = load_config_cli(DEFAULT_ROOT_PATH, "config.yaml", SERVICE_NAME)
     config[SERVICE_NAME] = service_config
     initialize_service_logging(service_name=SERVICE_NAME, config=config)
-    farmer_peer = UnresolvedPeerInfo(service_config["farmer_peer"]["host"], service_config["farmer_peer"]["port"])
-    service = create_harvester_service(DEFAULT_ROOT_PATH, config, DEFAULT_CONSTANTS, farmer_peer)
+
+    farmer_peers = []
+    if "farmer_peers" in service_config:
+        for farmer in service_config["farmer_peers"]:
+            peer_info = UnresolvedPeerInfo(farmer["host"], farmer["port"])
+            farmer_peers.append(peer_info)
+    else:
+        farmer_peer = UnresolvedPeerInfo(service_config["farmer_peer"]["host"], service_config["farmer_peer"]["port"])
+        farmer_peers.append(farmer_peer)
+    service = create_harvester_service(DEFAULT_ROOT_PATH, config, DEFAULT_CONSTANTS, farmer_peers)
     await service.setup_process_global_state()
     await service.run()
 

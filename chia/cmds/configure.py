@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import click
 
@@ -11,6 +11,7 @@ from chia.util.config import load_defaults_for_missing_services, lock_and_load_c
 def configure(
     root_path: Path,
     set_farmer_peer: str,
+    set_farmer_peers: List[str],
     set_node_introducer: str,
     set_fullnode_port: str,
     set_harvester_port: str,
@@ -59,6 +60,21 @@ def configure(
                     change_made = True
             except ValueError:
                 print("Farmer address must be in format [IP:Port]")
+        if set_farmer_peers:
+            config["harvester"]["farmer_peers"] = []
+            for farmer_peer in set_farmer_peers:
+                try:
+                    if farmer_peer.index(":"):
+                        host, port = (
+    		                ":".join(farmer_peer.split(":")[:-1]),
+    		                farmer_peer.split(":")[-1],
+    		            )
+                        peer = {"host": host, "port": int(port)}
+                        config["harvester"]["farmer_peers"].append(peer)
+                except ValueError:
+                    print("Farmer addresses must be in format [IP:Port]")
+            print("Farmer peers updated, make sure your harvester has the proper cert installed")
+            change_made = True
         if set_fullnode_port:
             config["full_node"]["port"] = int(set_fullnode_port)
             config["full_node"]["introducer_peer"]["port"] = int(set_fullnode_port)
@@ -217,6 +233,12 @@ def configure(
 @click.option("--set-node-introducer", help="Set the introducer for node - IP:Port", type=str)
 @click.option("--set-farmer-peer", help="Set the farmer peer for harvester - IP:Port", type=str)
 @click.option(
+    "--set-farmer-peers",
+    help="Set the list of farmer peers for harvester - IP:Port,IP:Port,...",
+    type=str,
+    multiple=True,
+)
+@click.option(
     "--set-fullnode-port",
     help="Set the port to use for the fullnode, useful for testing",
     type=str,
@@ -241,7 +263,7 @@ def configure(
     type=click.Choice(["true", "t", "false", "f"]),
 )
 @click.option(
-    "--set_outbound-peer-count",
+    "--set-outbound-peer-count",
     help="Update the target outbound peer count (default 8)",
     type=str,
 )
@@ -271,6 +293,7 @@ def configure(
 def configure_cmd(
     ctx: click.Context,
     set_farmer_peer: str,
+    set_farmer_peers: List[str],
     set_node_introducer: str,
     set_fullnode_port: str,
     set_harvester_port: str,
@@ -288,6 +311,7 @@ def configure_cmd(
     configure(
         ctx.obj["root_path"],
         set_farmer_peer,
+        set_farmer_peers,
         set_node_introducer,
         set_fullnode_port,
         set_harvester_port,
