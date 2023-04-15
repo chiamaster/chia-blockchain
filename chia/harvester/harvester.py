@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from typing_extensions import Literal
 
+from datetime import datetime, timedelta
+
 from chia.consensus.constants import ConsensusConstants
 from chia.plot_sync.sender import Sender
 from chia.plotting.manager import PlotManager
@@ -83,6 +85,11 @@ class Harvester:
     async def _start(self) -> None:
         self._refresh_lock = asyncio.Lock()
         self.event_loop = asyncio.get_running_loop()
+        self.last_signage_point: Optional[Tuple[bytes, int]] = None
+        self.last_signage_point_time: Optional[datetime] = None
+        
+        # Schedule the periodic task to check for new signage points
+        self.event_loop.create_task(self.check_for_new_signage_points())
 
     def _close(self) -> None:
         self._shut_down = True
@@ -93,6 +100,53 @@ class Harvester:
 
     async def _await_closed(self) -> None:
         await self.plot_sync_sender.await_closed()
+
+    async def check_for_new_signage_points(self):
+        while not self._shut_down:
+            try:
+                # Check if any peer has sent a new signage point
+                new_signage_point = await self.get_new_signage_point()
+
+                # If there's a new signage point, update our records
+                if new_signage_point is not None:
+                    self.last_signage_point = new_signage_point
+                    self.last_signage_point_time = datetime.now()
+
+                # Check if the last signage point is too old
+                if self.last_signage_point_time is not None:
+                    elapsed_time = datetime.now() - self.last_signage_point_time
+                    if elapsed_time > timedelta(minutes=2):
+                        # Restart the harvester
+                        self.log.info(f"Last signage point received more than 2 minutes ago, restarting harvester")
+                        self.restart_harvester()
+            except Exception as e:
+                self.log.error(f"Error checking for new signage points: {e}")
+
+            # Wait for some time before checking again
+            await asyncio.sleep(60)
+
+    async def get_new_signage_point(self) -> Optional[Tuple[bytes, int]]:
+        # Get the connections to all full nodes
+        connections = self.get_connections(NodeType.FULL_NODE)
+
+        # Iterate through all connections and get the signage point from the first one that has it
+        for connection in connections:
+            try:
+                async with connect_to_peer(connection) as peer:
+                    response = await peer.request_signage_point()
+                    if response is not None:
+                        return response["signage_point"]
+            except Exception as e:
+                self.log.warning(f"Error getting signage point from {connection}: {e}")
+
+        # If none of the connections have a new signage point, return None
+        return None
+
+    def restart_harvester(self) -> None:
+        # Restart the harvester by shutting it down and starting it again
+        self._close()
+        self.__init__(self.root_path, self.config, self.constants)
+        self._start()
 
     def get_connections(self, request_node_type: Optional[NodeType]) -> List[Dict[str, Any]]:
         return default_get_connections(server=self.server, request_node_type=request_node_type)
