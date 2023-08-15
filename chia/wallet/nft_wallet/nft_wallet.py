@@ -399,6 +399,7 @@ class NFTWallet:
             False,
             announcement_set,
             origin_id=origin.name(),
+            reuse_puzhash=reuse_puzhash,
         )
         genesis_launcher_solution = Program.to([eve_fullpuz_hash, amount, []])
 
@@ -1711,3 +1712,6 @@ class NFTWallet:
 
     def get_name(self) -> str:
         return self.wallet_info.name
+
+    async def match_hinted_coin(self, coin: Coin, hint: bytes32) -> bool:
+        return False

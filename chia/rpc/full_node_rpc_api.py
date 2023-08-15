@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from chia_rs import ALLOW_BACKREFS
+
 from chia.consensus.block_record import BlockRecord
 from chia.consensus.blockchain import Blockchain, BlockchainMutexPriority
 from chia.consensus.cost_calculator import NPCResult
@@ -12,6 +14,7 @@ from chia.full_node.full_node import FullNode
 from chia.full_node.mempool_check_conditions import get_puzzle_and_solution_for_coin, get_spends_for_block
 from chia.rpc.rpc_server import Endpoint, EndpointResult
 from chia.server.outbound_message import NodeType
+from chia.types.blockchain_format.proof_of_space import calculate_prefix_bits
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.coin_record import CoinRecord
 from chia.types.coin_spend import CoinSpend
@@ -56,7 +59,7 @@ async def get_average_block_time(
     if newer_block.height < 1:
         return None
 
-    prev_height = uint32(max(newer_block.height - 1, newer_block.height - height_distance))
+    prev_height = uint32(max(1, newer_block.height - height_distance))
     prev_hash = blockchain.height_to_hash(prev_height)
     assert prev_hash
     prev_block = await blockchain.get_block_record_from_db(prev_hash)
@@ -558,10 +561,11 @@ class FullNodeRpcApi:
             raise ValueError(f"Older block {older_block_hex} not found")
         delta_weight = newer_block.weight - older_block.weight
 
+        plot_filter_size = calculate_prefix_bits(self.service.constants, newer_block.height)
         delta_iters = newer_block.total_iters - older_block.total_iters
         weight_div_iters = delta_weight / delta_iters
         additional_difficulty_constant = self.service.constants.DIFFICULTY_CONSTANT_FACTOR
-        eligible_plots_filter_multiplier = 2**self.service.constants.NUMBER_ZERO_BITS_PLOT_FILTER
+        eligible_plots_filter_multiplier = 2**plot_filter_size
         network_space_bytes_estimate = (
             UI_ACTUAL_SPACE_CONSTANT_FACTOR
             * weight_div_iters
@@ -739,7 +743,11 @@ class FullNodeRpcApi:
 
         block_generator: Optional[BlockGenerator] = await self.service.blockchain.get_block_generator(block)
         assert block_generator is not None
-        spend_info = get_puzzle_and_solution_for_coin(block_generator, coin_record.coin, 0)
+        flags = 0
+        if height >= self.service.constants.HARD_FORK_HEIGHT:
+            flags = ALLOW_BACKREFS
+
+        spend_info = get_puzzle_and_solution_for_coin(block_generator, coin_record.coin, flags)
         return {"coin_solution": CoinSpend(coin_record.coin, spend_info.puzzle, spend_info.solution)}
 
     async def get_additions_and_removals(self, request: Dict[str, Any]) -> EndpointResult:
