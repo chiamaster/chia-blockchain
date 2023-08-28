@@ -47,6 +47,7 @@ from chia.util.path import path_from_root
 from chia.wallet.trade_record import TradeRecord
 from chia.wallet.trading.offer import Offer as TradingOffer
 from chia.wallet.transaction_record import TransactionRecord
+from chia.wallet.util.tx_config import DEFAULT_TX_CONFIG
 
 
 async def get_plugin_info(url: str) -> Tuple[str, Dict[str, Any]]:
@@ -181,9 +182,9 @@ class DataLayer:
         tree_id: bytes32,
         changelist: List[Dict[str, Any]],
     ) -> bytes32:
+        await self._update_confirmation_status(tree_id=tree_id)
+
         async with self.data_store.transaction():
-            # Make sure we update based on the latest confirmed root.
-            await self._update_confirmation_status(tree_id=tree_id)
             pending_root: Optional[Root] = await self.data_store.get_pending_root(tree_id=tree_id)
             if pending_root is not None:
                 raise Exception("Already have a pending root waiting for confirmation.")
@@ -210,8 +211,8 @@ class DataLayer:
         tree_id: bytes32,
         fee: uint64,
     ) -> TransactionRecord:
-        # Make sure we update based on the latest confirmed root.
         await self._update_confirmation_status(tree_id=tree_id)
+
         pending_root: Optional[Root] = await self.data_store.get_pending_root(tree_id=tree_id)
         if pending_root is None:
             raise Exception("Latest root is already confirmed.")
@@ -231,14 +232,16 @@ class DataLayer:
         key: bytes,
         root_hash: Optional[bytes32] = None,
     ) -> bytes32:
+        await self._update_confirmation_status(tree_id=store_id)
+
         async with self.data_store.transaction():
-            await self._update_confirmation_status(tree_id=store_id)
             node = await self.data_store.get_node_by_key(tree_id=store_id, key=key, root_hash=root_hash)
             return node.hash
 
     async def get_value(self, store_id: bytes32, key: bytes, root_hash: Optional[bytes32] = None) -> Optional[bytes]:
+        await self._update_confirmation_status(tree_id=store_id)
+
         async with self.data_store.transaction():
-            await self._update_confirmation_status(tree_id=store_id)
             res = await self.data_store.get_node_by_key(tree_id=store_id, key=key, root_hash=root_hash)
             if res is None:
                 self.log.error("Failed to fetch key")
@@ -247,6 +250,7 @@ class DataLayer:
 
     async def get_keys_values(self, store_id: bytes32, root_hash: Optional[bytes32]) -> List[TerminalNode]:
         await self._update_confirmation_status(tree_id=store_id)
+
         res = await self.data_store.get_keys_values(store_id, root_hash)
         if res is None:
             self.log.error("Failed to fetch keys values")
@@ -254,6 +258,7 @@ class DataLayer:
 
     async def get_keys(self, store_id: bytes32, root_hash: Optional[bytes32]) -> List[bytes]:
         await self._update_confirmation_status(tree_id=store_id)
+
         res = await self.data_store.get_keys(store_id, root_hash)
         return res
 
@@ -641,11 +646,12 @@ class DataLayer:
             return changelist
 
     async def process_offered_stores(self, offer_stores: Tuple[OfferStore, ...]) -> Dict[bytes32, StoreProofs]:
+        for offer_store in offer_stores:
+            await self._update_confirmation_status(tree_id=offer_store.store_id)
+
         async with self.data_store.transaction():
             our_store_proofs: Dict[bytes32, StoreProofs] = {}
             for offer_store in offer_stores:
-                await self._update_confirmation_status(tree_id=offer_store.store_id)
-
                 changelist = await self.build_offer_changelist(
                     store_id=offer_store.store_id,
                     inclusions=offer_store.inclusions,
@@ -733,6 +739,9 @@ class DataLayer:
                 driver_dict={},
                 fee=fee,
                 validate_only=False,
+                # TODO: probably shouldn't be default but due to peculiarities in the RPC, we're using a stop gap.
+                # This is not a change in behavior, the default was already implicit.
+                tx_config=DEFAULT_TX_CONFIG,
             )
             if wallet_offer is None:
                 raise Exception("offer is None despite validate_only=False")
@@ -817,6 +826,9 @@ class DataLayer:
             offer=offer,
             solver=solver,
             fee=fee,
+            # TODO: probably shouldn't be default but due to peculiarities in the RPC, we're using a stop gap.
+            # This is not a change in behavior, the default was already implicit.
+            tx_config=DEFAULT_TX_CONFIG,
         )
 
         return trade_record
@@ -834,6 +846,9 @@ class DataLayer:
             trade_id=trade_id,
             secure=secure,
             fee=fee,
+            # TODO: probably shouldn't be default but due to peculiarities in the RPC, we're using a stop gap.
+            # This is not a change in behavior, the default was already implicit.
+            tx_config=DEFAULT_TX_CONFIG,
         )
 
         if not secure:
